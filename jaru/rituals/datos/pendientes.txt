@@ -1,0 +1,5 @@
+# Pendientes del dia - una linea por tarea
+# Las lineas que empiezan con # se ignoran.
+# Ejemplo:
+# Revisar correo
+# Terminar informe

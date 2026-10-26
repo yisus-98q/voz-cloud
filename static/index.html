@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voz Cloud | JARVIS</title>
+<style>
+:root {
+  --bg:#020b19;
+  --panel:#07172b;
+  --line:#123c60;
+  --blue:#08baff;
+  --cyan:#00f0ff;
+  --text:#e3f4ff;
+  --muted:#83a9c9;
+  --green:#00e6a0;
+}
+* { box-sizing:border-box }
+body {
+  margin:0; background:radial-gradient(ellipse at top,#0b2443,var(--bg) 65%);
+  color:var(--text);font:15px Arial,sans-serif;min-height:100vh;
+}
+button,input { font:inherit }
+button { cursor:pointer }
+.app { display:grid;grid-template-columns:205px 1fr;min-height:100vh }
+.sidebar { background:#020b17;border-right:1px solid var(--line);padding:22px 14px;display:flex;flex-direction:column;gap:12px }
+.brand { font-size:24px;font-weight:bold;color:var(--blue);margin-bottom:24px }
+.brand small { display:block;color:var(--muted);font-size:11px;margin-top:7px;font-weight:normal }
+.nav { padding:13px;border:1px solid transparent;border-radius:10px;color:#b8d9f4;background:transparent;text-align:left }
+.nav:hover,.nav.active { background:#0b3155;border-color:#1265a0;color:white }
+.sidebar-bottom { margin-top:auto;border:1px solid var(--line);padding:13px;border-radius:10px;font-size:12px;color:var(--muted);line-height:2 }
+.dot { display:inline-block;width:8px;height:8px;background:var(--green);border-radius:50%;margin-right:7px }
+main { padding:22px;min-width:0 }
+.topbar { display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:20px;flex-wrap:wrap }
+h1 { font-size:23px;margin:0 0 6px }
+.subtitle { color:var(--muted);font-size:13px }
+.status { border:1px solid var(--line);padding:10px 14px;border-radius:20px;color:var(--green);font-size:13px }
+.grid { display:grid;grid-template-columns:1fr 1fr;gap:16px }
+.panel { background:linear-gradient(145deg,#091c32dd,#041020f2);border:1px solid var(--line);border-radius:15px;padding:18px;min-width:0;box-shadow:0 8px 35px #0003 }
+.panel h2 { font-size:15px;margin:0 0 15px;color:#d9efff }
+.hero { grid-column:1/-1;display:grid;grid-template-columns:220px 1fr;align-items:center;gap:20px;min-height:235px }
+.orb-wrap { display:flex;justify-content:center;align-items:center }
+.orb { width:155px;height:155px;border-radius:50%;border:2px solid var(--cyan);display:flex;align-items:center;justify-content:center;font-size:50px;color:var(--cyan);box-shadow:0 0 25px #00cfff70,inset 0 0 25px #008cff50;animation:pulse 3s infinite }
+.orb.listening { animation:pulse .8s infinite;border-color:var(--green);color:var(--green) }
+@keyframes pulse { 50% { box-shadow:0 0 40px #00cfffaa,inset 0 0 35px #008cff77;transform:scale(1.025) } }
+.hero h2 { font-size:26px;margin:0 0 8px }
+.hero p { color:var(--muted);line-height:1.5 }
+.actions { display:flex;gap:10px;flex-wrap:wrap;margin-top:15px }
+.btn { border:1px solid #1269a0;border-radius:9px;padding:11px 15px;background:#082c4b;color:white }
+.btn.primary { background:linear-gradient(100deg,#087be7,#00bce9);border:0 }
+.btn:hover { filter:brightness(1.2) }
+.metrics { display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px }
+.metric { background:#061529;border:1px solid var(--line);padding:13px;border-radius:10px }
+.metric strong { display:block;font-size:22px;color:var(--blue);margin-bottom:5px }
+.metric span { color:var(--muted);font-size:12px }
+.list { display:grid;gap:10px }
+.row { display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;background:#06172a;border-radius:8px;font-size:13px }
+.tag { font-size:11px;color:var(--green);background:#004434;padding:5px 8px;border-radius:20px }
+.tag.off { color:#ffbf58;background:#39270c }
+.chat { display:flex;flex-direction:column;height:350px }
+.messages { overflow:auto;flex:1;display:flex;flex-direction:column;gap:12px;padding:3px 2px 15px }
+.msg { padding:11px 13px;border-radius:12px;max-width:88%;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere }
+.msg.bot { align-self:flex-start;background:#0b2947;border:1px solid #123c60 }
+.msg.user { align-self:flex-end;background:#07569a }
+.msg small { display:block;color:#91b9d9;font-size:10px;margin-top:5px }
+.chat-form { display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--line) }
+.chat-form input { min-width:0;flex:1;background:#020d1c;border:1px solid var(--line);border-radius:9px;padding:12px;color:white;outline:none }
+.chat-form input:focus { border-color:var(--blue) }
+.footer { text-align:center;color:#577b9d;font-size:11px;padding:22px }
+@media(max-width:850px) {
+  .app { grid-template-columns:1fr }
+  .sidebar { flex-direction:row;flex-wrap:wrap;align-items:center;border-right:0;border-bottom:1px solid var(--line) }
+  .brand { width:100%;margin-bottom:4px }
+  .sidebar-bottom { display:none }
+  main { padding:14px }
+  .hero { grid-template-columns:1fr;text-align:center;padding:24px }
+  .actions { justify-content:center }
+}
+@media(max-width:580px) {
+  .grid { grid-template-columns:1fr }
+  .hero { grid-column:auto }
+  .metrics { grid-template-columns:1fr }
+  .orb { width:125px;height:125px }
+}
+</style>
+</head>
+<body>
+<!DOCTYPE html>
+<html lang="es">
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">◉ VOZ CLOUD<small>Asistente inteligente JARVIS</small></div>
+    <button class="nav active" data-section="inicio">⌂ &nbsp; Inicio</button>
+    <button class="nav" data-section="agentes">◈ &nbsp; Agentes</button>
+    <button class="nav" data-section="memoria">▤ &nbsp; Memoria</button>
+    <button class="nav" data-section="actividad">◷ &nbsp; Actividad</button>
+    <button class="nav" data-section="salud">♡ &nbsp; Salud del sistema</button>
+    <div class="sidebar-bottom">
+      <span class="dot"></span> Voz Cloud<br>
+      API: <span id="apiState">Conectando...</span><br>
+      <span id="lastUpdate">Esperando servidor</span>
+    </div>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <div>
+        <h1>Centro de control</h1>
+        <div class="subtitle">Tu asistente personal de voz e inteligencia artificial</div>
+      </div>
+      <div class="status"><span class="dot"></span><span id="systemStatus">Conectando API</span></div>
+    </header>
+
+    <section class="metrics">
+      <div class="metric"><strong id="agentCount">—</strong><span>Agentes detectados</span></div>
+      <div class="metric"><strong id="eventCount">—</strong><span>Eventos recibidos</span></div>
+      <div class="metric"><strong id="healthValue">—</strong><span>Estado del servidor</span></div>
+    </section>
+
+    <section class="grid">
+      <div class="panel hero">
+        <div class="orb-wrap"><div id="orb" class="orb">ϟ</div></div>
+        <div>
+          <h2>JARVIS <span style="color:var(--cyan)">●</span></h2>
+          <div id="voiceStatus" style="color:var(--green)">Sistema preparado</div>
+          <p>Escribe un comando o pulsa el micrófono para hablar conmigo. La respuesta dependerá de las funciones disponibles en tu backend.</p>
+          <div class="actions">
+            <button class="btn primary" id="micBtn">🎙 Activar micrófono</button>
+            <button class="btn" id="muteBtn">🔇 Silenciar voz</button>
+            <button class="btn" id="refreshBtn">↻ Actualizar sistema</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>◈ Agentes inteligentes</h2>
+        <div id="agents" class="list"><div class="row">Cargando agentes…</div></div>
+      </div>
+
+      <div class="panel">
+        <h2>♡ Estado del sistema</h2>
+        <div id="health" class="list"><div class="row">Consultando servidor…</div></div>
+      </div>
+
+      <div class="panel">
+        <h2>▤ Conversación con Voz Cloud</h2>
+        <div class="chat">
+          <div class="messages" id="messages">
+            <div class="msg bot">Hola. Soy Voz Cloud. Puedes escribir un comando o utilizar el micrófono.<small>JARVIS · Local</small></div>
+          </div>
+          <form class="chat-form" id="chatForm">
+            <input id="commandInput" placeholder="Escribe un comando o pregunta…" autocomplete="off">
+            <button class="btn primary" type="submit">Enviar</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>◷ Actividad reciente</h2>
+        <div id="events" class="list"><div class="row">Cargando actividad…</div></div>
+      </div>
+    </section>
+    <div class="footer">VOZ CLOUD · ASISTENTE DE IA · PANEL DE CONTROL LOCAL</div>
+  </main>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let muted = false;
+let recognition = null;
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) }
+  });
+  if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+function showMessage(text, type = "bot") {
+  const el = document.createElement("div");
+  el.className = "msg " + type;
+  el.appendChild(document.createTextNode(text));
+  const time = document.createElement("small");
+  time.textContent = new Date().toLocaleTimeString();
+  el.appendChild(time);
+  $("messages").appendChild(el);
+  $("messages").scrollTop = $("messages").scrollHeight;
+}
+
+function speak(text) {
+  if (muted || !("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "es-PE";
+  speechSynthesis.speak(utterance);
+}
+
+function safeText(value) {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function renderList(id, data, emptyText) {
+  const container = $(id);
+  container.replaceChildren();
+  const items = Array.isArray(data) ? data : [];
+  if (!items.length) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.textContent = emptyText;
+    container.appendChild(row);
+    return;
+  }
+  items.slice(0, 8).forEach(item => {
+    const row = document.createElement("div");
+    row.className = "row";
+    const label = document.createElement("span");
+    const value = typeof item === "string"
+      ? item
+      : safeText(item.name || item.agent || item.type || item.event || item.message || item.status || item.id || JSON.stringify(item));
+    label.textContent = value;
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = typeof item === "object" ? safeText(item.status || "OK") : "Detectado";
+    row.append(label, tag);
+    container.appendChild(row);
+  });
+}
+
+async function loadStatus() {
+  try {
+    const status = await api("/status");
+    $("apiState").textContent = "Conectada";
+    $("systemStatus").textContent = "API en línea";
+    $("healthValue").textContent = safeText(status.status || status.state || "OK");
+    $("lastUpdate").textContent = "Actualizado " + new Date().toLocaleTimeString();
+  } catch (e) {
+    $("apiState").textContent = "Sin conexión";
+    $("systemStatus").textContent = "API no disponible";
+    $("healthValue").textContent = "—";
+  }
+}
+
+async function loadHealth() {
+  try {
+    let data;
+    try { data = await api("/health/details"); }
+    catch { data = await api("/health"); }
+    const items = Array.isArray(data) ? data : Object.entries(data).map(([name, value]) => ({name, status: safeText(value)}));
+    renderList("health", items, "No hay detalles de salud disponibles");
+  } catch {
+    renderList("health", [], "No se pudo consultar /health");
+  }
+}
+
+async function loadAgents() {
+  try {
+    const data = await api("/agents");
+    const items = Array.isArray(data) ? data : (data.agents || data.items || []);
+    $("agentCount").textContent = items.length || safeText(data.count ?? "0");
+    renderList("agents", items, "El backend no ha devuelto agentes");
+  } catch {
+    $("agentCount").textContent = "—";
+    renderList("agents", [], "No se pudo consultar /agents");
+  }
+}
+
+async function loadEvents() {
+  try {
+    const data = await api("/events");
+    const items = Array.isArray(data) ? data : (data.events || data.items || []);
+    $("eventCount").textContent = items.length || safeText(data.count ?? "0");
+    renderList("events", items.slice().reverse(), "Todavía no hay eventos");
+  } catch {
+    $("eventCount").textContent = "—";
+    renderList("events", [], "No se pudo consultar /events");
+  }
+}
+
+async function refreshAll() {
+  $("refreshBtn").textContent = "Actualizando…";
+  await Promise.all([loadStatus(), loadHealth(), loadAgents(), loadEvents()]);
+  $("refreshBtn").textContent = "↻ Actualizar sistema";
+}
+
+async function sendCommand(text) {
+  text = text.trim();
+  if (!text) return;
+  showMessage(text, "user");
+  $("commandInput").value = "";
+  $("voiceStatus").textContent = "Procesando comando…";
+  $("orb").classList.add("listening");
+
+  try {
+    const result = await api("/command", {
+      method: "POST",
+      body: JSON.stringify({ command: text, text: text, source: "web" })
+    });
+    const answer = result.response || result.reply || result.message || result.result || "El servidor recibió el comando.";
+    showMessage(safeText(answer), "bot");
+    speak(safeText(answer));
+    $("voiceStatus").textContent = "Respuesta recibida";
+  } catch (error) {
+    showMessage("No pude enviar el comando: el endpoint POST /command no respondió. Hay que conectarlo a la ruta real de tu backend.", "bot");
+    $("voiceStatus").textContent = "Falta conectar el endpoint de comandos";
+  } finally {
+    $("orb").classList.remove("listening");
+  }
+}
+
+$("chatForm").addEventListener("submit", event => {
+  event.preventDefault();
+  sendCommand($("commandInput").value);
+});
+
+$("refreshBtn").addEventListener("click", refreshAll);
+$("muteBtn").addEventListener("click", () => {
+  muted = !muted;
+  $("muteBtn").textContent = muted ? "🔊 Activar voz" : "🔇 Silenciar voz";
+  if (muted && "speechSynthesis" in window) speechSynthesis.cancel();
+});
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.lang = "es-PE";
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.onstart = () => {
+    $("voiceStatus").textContent = "Escuchando…";
+    $("orb").classList.add("listening");
+  };
+  recognition.onresult = event => sendCommand(event.results[0][0].transcript);
+  recognition.onerror = event => {
+    $("voiceStatus").textContent = "Error de micrófono: " + event.error;
+  };
+  recognition.onend = () => $("orb").classList.remove("listening");
+  $("micBtn").addEventListener("click", () => {
+    try { recognition.start(); }
+    catch { $("voiceStatus").textContent = "El micrófono ya está activo"; }
+  });
+} else {
+  $("micBtn").addEventListener("click", () => {
+    $("voiceStatus").textContent = "Usa Chrome o Edge para probar el reconocimiento de voz";
+  });
+}
+
+document.querySelectorAll(".nav").forEach(button => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".nav").forEach(b => b.classList.remove("active"));
+    button.classList.add("active");
+    const map = {
+      inicio: "top",
+      agentes: "agents",
+      memoria: "messages",
+      actividad: "events",
+      salud: "health"
+    };
+    const target = map[button.dataset.section];
+    if (target === "top") window.scrollTo({top: 0, behavior: "smooth"});
+    else $(target).scrollIntoView({behavior: "smooth", block: "center"});
+  });
+});
+
+refreshAll();
+setInterval(refreshAll, 10000);
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+[submodule "J.A.R.V.I.S"]
+	path = J.A.R.V.I.S
+	url = https://github.com/GauravSingh9356/J.A.R.V.I.S.git
+	branch = master
+[submodule "ultron"]
+	path = ultron
+	url = https://github.com/modelscope/ultron.git
+	branch = main
+[submodule "voice-to-claude"]
+	path = voice-to-claude
+	url = https://github.com/enesbasbug/voice-to-claude.git
+	branch = main

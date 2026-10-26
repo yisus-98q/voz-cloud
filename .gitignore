@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+config.json
+
+# Runtime state, recordings and local databases
+data/
+*.db
+*.db-shm
+*.db-wal
+*.npy
+
+# Logs and transient server output
+*.log
+*.out
+server_*.txt
+server_out.txt
+tts_errors.log
+tts_test.log
+
+# Editor and operating-system files
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

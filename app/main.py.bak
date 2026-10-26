@@ -1,0 +1,383 @@
+"""Voz Cloud — Servidor FastAPI (Fases 1-5).
+
+Rutas del contrato (ver static/CONTRATO-API.md):
+  GET    /health                 Fase 2
+  GET    /health/report          Fase 2
+  GET    /status                 Fase 1
+  POST   /mute/{value}           Fase 1
+  GET    /agents                 Fase 4
+  GET    /events?since={id}      Fase 3
+  GET    /config                 Fase 3
+  PUT    /config                 Fase 3
+  POST   /voice/command          Fase 5
+  GET    /voice/feed?since={id}  Fase 5
+  POST   /voice/confirm          Fase 5
+  POST   /stt/{on|off}           Fase 5
+
+La interfaz estática se sirve desde static/ y cada ruta que responde
+pasa de DEMO a EN VIVO en el panel.
+"""
+import time
+import threading
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from .classifier import classify
+from .dedupe import Deduper
+from .speech_queue import queue
+from .aggregator import Aggregator
+from .piper_tts import speak
+from .events_store import event_store
+from .agents import agent_registry
+from .config import config as config_obj, save as save_config, load as load_config
+from .voice import interpretar, confirmar
+from . import stt as stt_mod
+from . import memory_store
+from .memory_store import add_event as ms_add_event
+from . import orchestrator as orch_mod
+
+app = FastAPI(title="Voz Cloud")
+
+# CORS (por si la interfaz se sirve desde otro puerto)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Instancias globales
+dedupe = Deduper()
+agg = Aggregator(queue)
+stats = {"received": 0, "spoken_candidates": 0, "duplicates": 0}
+last_ingest_ts = time.time()
+
+
+class Line(BaseModel):
+    agent: str
+    line: str
+
+
+# ==================== Fase 1: Estabilidad ====================
+
+@app.post("/ingest")
+def ingest(body: Line):
+    global last_ingest_ts
+    stats["received"] += 1
+    last_ingest_ts = time.time()
+    ev = classify(body.agent, body.line)
+    if ev is None:
+        return {"ok": True, "ignored": True}
+    if not dedupe.allow(ev.agent, ev.text):
+        stats["duplicates"] += 1
+        return {"ok": True, "duplicate": True}
+    stats["spoken_candidates"] += 1
+    agg.add(ev)
+    # Persist event in SQLite memory store
+    ms_add_event(ev.agent, ev.level.name, ev.text, ev.raw)
+    return {"ok": True, "level": ev.level.name}
+
+
+@app.post("/command")
+def command(body: dict):
+    """Recibe un comando de voz desde la interfaz web."""
+    text = body.get("text", body.get("command", ""))
+    if not text:
+        return {"response": "Comando vacío"}
+    # Clasificar y procesar el comando
+    ev = classify(body.get("source", "web"), text)
+    if ev is None:
+        return {"response": "Comando no reconocido"}
+    if not dedupe.allow(ev.agent, ev.text):
+        return {"response": "Comando duplicado"}
+    stats["spoken_candidates"] += 1
+    agg.add(ev)
+    # Persistir evento en SQLite
+    ms_add_event(ev.agent, ev.level.name, ev.text, ev.raw)
+    return {"response": ev.level.name.title}
+
+
+@app.get("/status")
+def status():
+    cur = queue.current
+    # Determinar estado de voz basado en si STT está escuchando
+    listening = stt_mod.is_listening()
+    if listening:
+        vs = "listening"
+    elif queue.muted or not listening:
+        vs = "idle"
+    else:
+        vs = "processing"
+    return {
+        "queue": queue.size(),
+        "dropped": queue.dropped,
+        "muted": queue.muted,
+        "max": queue.max_size,
+        "current": {"text": cur.text} if cur.text else None,
+        "mic": listening,
+        "voice_state": vs,
+    }
+
+
+@app.post("/mute/{value}")
+def mute(value: bool):
+    queue.muted = value
+    return {"muted": queue.muted}
+
+
+# ==================== Fase 2: Centro de salud ====================
+
+@app.get("/health")
+def health_endpoint():
+    return health.run_health()
+
+
+@app.get("/health/details")
+def health_details():
+    """Versión completa con latencias y detalles de cada componente."""
+    h = health.run_health(timeout_s=5)
+    worst = health.worst_status(h["checks"])
+    return {
+        "status": worst,
+        "ts": h["ts"],
+        "checks": {c["name"]: {"status": c["status"], "detail": c["detail"], "latency_ms": c["latency_ms"]} for c in h["checks"]},
+    }
+
+
+@app.get("/health/report")
+def health_report():
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(content=health.health_report(), media_type="text/plain")
+
+
+# ==================== Fase 3: Notificaciones inteligentes ====================
+
+@app.get("/agents")
+def agents_endpoint():
+    return {"agents": agent_registry.list()}
+
+
+@app.get("/events")
+def events_endpoint(since: int = 0):
+    # Obtener eventos de la memoria persistente SQLite
+    ms_events = memory_store.get_events(since_id=since, limit=200)
+    # Obtener eventos del almacén en memoria (event_store existente)
+    db_events = event_store.list(since_id=since, limit=200)
+    
+    # Normalizar y deduplicar por ID
+    seen_ids = set()
+    combined = []
+    
+    # Normalizar eventos de la base de datos (formato legacy)
+    for e in db_events:
+        normalized = {
+            "id": e["id"],
+            "ts": e["ts"],
+            "level": e["level"],
+            "agent": e["agent"],
+            "text": e.get("text", e.get("description", "")),
+            "raw": e.get("raw", ""),
+        }
+        if normalized["id"] not in seen_ids:
+            seen_ids.add(normalized["id"])
+            combined.append(normalized)
+    
+    # Normalizar eventos de SQLite y agregar los que no sean duplicados
+    for e in ms_events:
+        normalized = {
+            "id": e["id"],
+            "ts": e["ts"],
+            "level": e["level"],
+            "agent": e.get("agent") or e.get("agent_id", ""),
+            "text": e.get("description", e.get("text", "")),
+            "raw": e.get("raw", ""),
+        }
+        if normalized["id"] not in seen_ids:
+            seen_ids.add(normalized["id"])
+            combined.append(normalized)
+    
+    # Devolver en orden cronológico (id creciente)
+    combined.sort(key=lambda x: x["id"])
+    return {"events": combined}
+
+
+@app.get("/config")
+def config_get():
+    return config_obj
+
+
+@app.put("/config")
+def config_set(cfg: dict):
+    # Validar campos esperados
+    allowed = {"levels", "quiet_start", "quiet_end", "dedupe_s", "queue_max", "queue_age_s"}
+    clean = {k: v for k, v in cfg.items() if k in allowed}
+    saved = save_config(clean)
+    # Aplicar a componentes en tiempo real
+    dedupe.ttl = float(saved.get("dedupe_s", 30))
+    queue.max_size = int(saved.get("queue_max", 8))
+    queue.max_age = float(saved.get("queue_age_s", 60))
+    return saved
+
+
+# ==================== Fase 5: Control por voz ====================
+
+class VoiceCommand(BaseModel):
+    text: str
+
+
+class ConfirmBody(BaseModel):
+    id: str
+    accept: bool
+
+
+@app.post("/voice/command")
+def voice_command(body: VoiceCommand):
+    texto = body.text or ""
+    reply, confirm, _ = interpretar(texto)
+    item = stt_mod._add_voice_item(texto, reply, confirm)
+    # Reproducir la respuesta por voz en un hilo separado
+    if reply:
+        threading.Thread(target=_speak_text, args=(reply,), daemon=True).start()
+    return item
+
+
+def _speak_text(texto: str):
+    """Reproduce texto por voz en un hilo separado."""
+    try:
+        from .piper_tts import speak
+        speak(texto)
+    except Exception as e:
+        import logging
+        logging.error(f"Error al reproducir voz: {e}")
+
+
+@app.get("/voice/feed")
+def voice_feed(since: int = 0):
+    items = stt_mod.get_voice_items(since_id=since)
+    return {"items": items}
+
+
+@app.post("/voice/confirm")
+def voice_confirm(body: ConfirmBody):
+    return confirmar(body.id, body.accept)
+
+
+# ==================== Fase 5: OpenCode sesiones (rutas específicas ANTES que /stt/{value}) ====================
+
+@app.get("/stt/sessions")
+def stt_sessions():
+    data, err = stt_mod._oc_fetch("/api/session")
+    if err:
+        return {"sessions": [], "error": err}
+    sessions = data if isinstance(data, list) else data.get("data", data if isinstance(data, list) else [])
+    return {"sessions": sessions}
+
+
+@app.get("/stt/session")
+def stt_selected_session():
+    sid = stt_mod.get_selected_session()
+    if not sid:
+        return {"session": None, "message": "No hay sesión seleccionada"}
+    data, err = stt_mod._oc_fetch(f"/api/session/{sid}")
+    if err:
+        return {"session": sid, "error": err}
+    return {"session": sid, "data": data}
+
+
+@app.post("/stt/session/{session_id}")
+def stt_select_session(session_id: str):
+    stt_mod.set_selected_session(session_id)
+    return {"ok": True, "session": session_id}
+
+
+class SttSendBody(BaseModel):
+    text: str
+
+
+@app.post("/stt/send")
+def stt_send(body: SttSendBody):
+    sid = stt_mod.get_selected_session()
+    data, err = stt_mod._oc_send_and_speak(sid, body.text)
+    if err:
+        return {"ok": False, "error": err}
+    return {"ok": True, "result": data}
+
+
+@app.get("/stt/pending")
+def stt_pending():
+    return {"text": stt_mod.get_pending_text()}
+
+
+@app.get("/stt/last-response")
+def stt_last_response():
+    return {"text": stt_mod.get_last_oc_response()}
+
+
+@app.post("/stt/speak-response")
+def stt_speak_response():
+    # Ejecutar en hilo separado para no bloquear la respuesta HTTP
+    def _speak():
+        stt_mod.speak_oc_response()
+    threading.Thread(target=_speak, daemon=True).start()
+    return {"ok": True, "message": "Reproduciendo la explicación de OpenCode..."}
+
+
+@app.post("/speak")
+def speak_endpoint(body: dict):
+    texto = (body.get("text") or "").strip()
+    if not texto:
+        return {"ok": False, "error": "Texto vacío"}
+    threading.Thread(target=_speak_text, args=(texto,), daemon=True).start()
+    return {"ok": True, "message": "Reproduciendo..."}
+
+
+@app.post("/stt/{value}")
+def stt_toggle(value: str):
+    listening = value.lower() == "on"
+    if listening:
+        stt_mod.start_listening()
+    else:
+        stt_mod.stop_listening()
+    return {"listening": stt_mod.is_listening()}
+
+
+# ==================== Orquestador de agentes ====================
+
+@app.get("/orchestrator/status")
+def orchestrator_status():
+    return orch_mod.orchestrator.get_status()
+
+
+class OrchestratorDispatchBody(BaseModel):
+    agent: str
+    command: str
+
+
+@app.post("/orchestrator/dispatch")
+def orchestrator_dispatch(body: OrchestratorDispatchBody):
+    cmd_id = orch_mod.orchestrator.dispatch(body.agent, body.command)
+    return {"ok": True, "command_id": cmd_id}
+
+
+class OrchestratorDispatchAllBody(BaseModel):
+    command: str
+
+
+@app.post("/orchestrator/dispatch-all")
+def orchestrator_dispatch_all(body: OrchestratorDispatchAllBody):
+    results = orch_mod.orchestrator.dispatch_all(body.command)
+    return {"ok": True, "dispatched": results}
+
+
+@app.get("/orchestrator/commands")
+def orchestrator_commands():
+    return {"commands": orch_mod.orchestrator.command_queue.list_all()}
+
+
+# ==================== Servir interfaz estática ====================
+
+# Las rutas API definidas arriba tienen prioridad sobre el mount.
+app.mount("/", StaticFiles(directory="static", html=True), name="ui")
